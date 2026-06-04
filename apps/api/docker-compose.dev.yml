@@ -1,0 +1,67 @@
+services:
+  postgres:
+    image: postgres:18-alpine
+    container_name: rectangle-postgres
+    restart: unless-stopped
+    ports:
+      - "5435:5432"
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    volumes:
+      - rectangle_postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rectangle -d rectangle"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:8-alpine
+    container_name: rectangle-redis
+    restart: unless-stopped
+    ports:
+      - "6381:6379"
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - rectangle_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis-insight:
+    image: redis/redisinsight:latest
+    container_name: rectangle-redis-insight
+    restart: unless-stopped
+    ports:
+      - "5542:5540"
+    volumes:
+      - rectangle_redis_insight_data:/data
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  drizzle-gateway:
+    image: ghcr.io/drizzle-team/gateway:latest
+    container_name: rectangle-drizzle-gateway
+    restart: unless-stopped
+    ports:
+      - "4985:4983"
+    environment:
+      PORT: 4985
+      STORE_PATH: /app
+      MASTERPASS: rectangle_password
+    volumes:
+      - rectangle_drizzle_gateway_data:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  rectangle_postgres_data:
+  rectangle_redis_data:
+  rectangle_redis_insight_data:
+  rectangle_drizzle_gateway_data:
