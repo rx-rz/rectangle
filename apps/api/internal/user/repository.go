@@ -54,7 +54,7 @@ func (r *Repository) FindByEmail(ctx context.Context, email string) (*User, erro
 	query := `
 	SELECT id, name, email, avatar_url, email_verified_at, created_at
 	FROM users
-	WHERE email = $1
+	WHERE lower(email) = lower($1)
 	`
 
 	var user User

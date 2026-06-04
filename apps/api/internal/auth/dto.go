@@ -31,6 +31,13 @@ type VerifyOTPParams struct {
 	Code  string
 }
 
+type CreateOTPParams struct {
+	UserID  string
+	Email   string
+	Purpose OTPPurpose
+	OtpHash []byte
+}
+
 type AuthResponse struct {
 	User user.UserResponse `json:"user"`
 	// Session AuthSessionResponse `json:"session,omitempty"`

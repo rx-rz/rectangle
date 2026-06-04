@@ -19,8 +19,10 @@ type UserRepository interface {
 }
 
 type OTPRepository interface {
-	CreateOTP(ctx context.Context, email string, otpHash []byte) error
-	GetOTPByEmail(ctx context.Context, email string, otpHash []byte, purpose OTPPurpose) (*OTP, error)
+	CreateOTP(ctx context.Context, params CreateOTPParams) error
+	GetOTPByEmail(ctx context.Context, email string, purpose OTPPurpose) (*OTP, error)
+	IncrementOTPAttempts(ctx context.Context, otpID int64) error
+	VerifyEmailWithOTP(ctx context.Context, userID string) error
 }
 
 type AuthService struct {
@@ -33,6 +35,7 @@ type AuthService struct {
 type ServiceOptions struct {
 	UserRepository UserRepository
 	OTPRepository  OTPRepository
+	Config         config.Config
 	Logger         *slog.Logger
 }
 
@@ -40,6 +43,7 @@ func NewService(opts ServiceOptions) *AuthService {
 	return &AuthService{
 		userRepo: opts.UserRepository,
 		otpRepo:  opts.OTPRepository,
+		cfg:      opts.Config,
 		logger:   opts.Logger,
 	}
 }
@@ -81,28 +85,47 @@ func (s *AuthService) SignupWithEmail(ctx context.Context, input EmailSignupInpu
 
 func (s *AuthService) SendOTP(ctx context.Context, input SendOTPParams) error {
 	otp, err := helpers.GenerateOTP()
-	s.logger.Log(ctx, slog.LevelInfo, otp)
 	if err != nil {
 		return err
 	}
+
+	existingUser, err := s.userRepo.FindByEmail(ctx, input.Email)
+	if err != nil {
+		return err
+	}
+	if existingUser == nil {
+		return ErrOTPNotFound
+	}
+
 	otpHash := helpers.HashOTPCode(otp, s.cfg.OtpSecret)
-	err = s.otpRepo.CreateOTP(ctx, input.Email, (otpHash))
+	return s.otpRepo.CreateOTP(ctx, CreateOTPParams{
+		UserID:  existingUser.ID,
+		Email:   existingUser.Email,
+		Purpose: OTPPurposeEmailVerification,
+		OtpHash: otpHash,
+	})
+}
+
+func (s *AuthService) VerifyOTP(ctx context.Context, input VerifyOTPParams) error {
+	dbOtp, err := s.otpRepo.GetOTPByEmail(ctx, input.Email, OTPPurposeEmailVerification)
+	if err != nil {
+		return err
+	}
+	if time.Now().After(dbOtp.ExpiresAt) {
+		return ErrOTPExpired
+	}
+	if dbOtp.Attempts >= 5 {
+		return ErrOTPTooManyAttempts
+	}
+	if !helpers.VerifyOTPCode(input.Code, dbOtp.OtpHash, s.cfg.OtpSecret) {
+		if err := s.otpRepo.IncrementOTPAttempts(ctx, dbOtp.ID); err != nil {
+			return err
+		}
+		return ErrOTPInvalid
+	}
+	err = s.otpRepo.VerifyEmailWithOTP(ctx, dbOtp.UserID)
 	if err != nil {
 		return err
 	}
 	return nil
-}
-
-func (s *AuthService) VerifyOTP(ctx context.Context, input VerifyOTPParams) error {
-	otpHash := helpers.HashOTPCode(input.Code, s.cfg.OtpSecret)
-	dbOtp, err := s.otpRepo.GetOTPByEmail(ctx, input.Email, otpHash, OTPPurposeEmailVerification)
-	if err != nil {
-		return err
-	}
-	if dbOtp.ConsumedAt.Valid {
-		return ErrOTPAlreadyUsed
-	}
-	if time.Now().After(dbOtp.ExpiresAt) {
-
-	}
 }

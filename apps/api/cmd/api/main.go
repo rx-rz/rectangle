@@ -38,6 +38,7 @@ func main() {
 	authService := auth.NewService(auth.ServiceOptions{
 		UserRepository: userRepo,
 		OTPRepository:  authRepo,
+		Config:         cfg,
 		Logger:         appLogger,
 	})
 

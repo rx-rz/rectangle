@@ -88,5 +88,9 @@ func (c Config) Validate() error {
 		return fmt.Errorf("DATABASE_URL must include a host")
 	}
 
+	if c.OtpSecret == "" {
+		return fmt.Errorf("OTP_HASH_SECRET is required")
+	}
+
 	return nil
 }
