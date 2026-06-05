@@ -85,6 +85,7 @@ func (s *AuthService) SignupWithEmail(ctx context.Context, input EmailSignupInpu
 
 func (s *AuthService) SendOTP(ctx context.Context, input SendOTPParams) error {
 	otp, err := helpers.GenerateOTP()
+	s.logger.Log(ctx, slog.LevelInfo, otp)
 	if err != nil {
 		return err
 	}
@@ -98,12 +99,17 @@ func (s *AuthService) SendOTP(ctx context.Context, input SendOTPParams) error {
 	}
 
 	otpHash := helpers.HashOTPCode(otp, s.cfg.OtpSecret)
-	return s.otpRepo.CreateOTP(ctx, CreateOTPParams{
+	err = s.otpRepo.CreateOTP(ctx, CreateOTPParams{
 		UserID:  existingUser.ID,
 		Email:   existingUser.Email,
 		Purpose: OTPPurposeEmailVerification,
 		OtpHash: otpHash,
 	})
+	if err != nil {
+		s.logger.Log(ctx, slog.LevelError, err.Error())
+		return err
+	}
+	return nil
 }
 
 func (s *AuthService) VerifyOTP(ctx context.Context, input VerifyOTPParams) error {

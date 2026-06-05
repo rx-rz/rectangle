@@ -45,7 +45,10 @@ func New(opts Options) *http.Server {
 
 func registerRoutes(opts routeOptions) {
 	opts.Mux.HandleFunc("GET /health", healthHandler)
+
+	//auth
 	opts.Mux.HandleFunc("POST /auth/signup/email", opts.AuthHandler.SignupWithEmail)
+	opts.Mux.HandleFunc("POST /auth/otp/send", opts.AuthHandler.SendOTP)
 }
 
 func healthHandler(w http.ResponseWriter, _ *http.Request) {

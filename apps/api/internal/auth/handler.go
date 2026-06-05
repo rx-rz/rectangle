@@ -52,3 +52,22 @@ func (h *Handler) SignupWithEmail(w http.ResponseWriter, r *http.Request) {
 		h.logger.Error("failed to write signup response", "error", err)
 	}
 }
+
+func (h *Handler) SendOTP(w http.ResponseWriter, r *http.Request) {
+	var input SendOTPInput
+	if err := helpers.ReadJSON(w, r, &input); err != nil {
+		helpers.WriteError(w, apperror.BadRequest(err.Error()))
+		return
+	}
+	err := h.service.SendOTP(r.Context(), SendOTPParams{Email: input.Email})
+	if err != nil {
+		helpers.WriteError(w, err)
+		return
+	}
+	err = helpers.WriteJSON(w, http.StatusCreated, helpers.Envelope{
+		"message": "OTP sent successfully",
+	}, nil)
+	if err != nil {
+		h.logger.Error("failed to write response", "error", err)
+	}
+}
