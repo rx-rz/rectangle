@@ -49,6 +49,7 @@ func registerRoutes(opts routeOptions) {
 	//auth
 	opts.Mux.HandleFunc("POST /auth/signup/email", opts.AuthHandler.SignupWithEmail)
 	opts.Mux.HandleFunc("POST /auth/otp/send", opts.AuthHandler.SendOTP)
+	opts.Mux.HandleFunc("POST /auth/otp/verify", opts.AuthHandler.VerifyOTP)
 }
 
 func healthHandler(w http.ResponseWriter, _ *http.Request) {

@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"log/slog"
+
 	"github.com/jmoiron/sqlx"
 )
 
@@ -29,20 +31,29 @@ func (r *Repository) GetOTPByEmail(ctx context.Context, email string, purpose OT
 	query := `
 	SELECT id, user_id, email, otp_hash, purpose, expires_at, created_at, attempts
 	FROM otps
-	WHERE lower(email) = lower($1)
+	WHERE email = $1
 		AND purpose = $2
 	ORDER BY created_at DESC
 	LIMIT 1
 	`
+
 	var otp OTP
-	args := []any{email, purpose}
-	err := r.db.GetContext(ctx, &otp, query, args...)
+
+	err := r.db.GetContext(ctx, &otp, query, email, purpose)
 	if err != nil {
+		slog.ErrorContext(ctx, "failed to get otp by email",
+			"email", email,
+			"purpose", purpose,
+			"error", err,
+		)
+
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrOTPNotFound
 		}
+
 		return nil, err
 	}
+
 	return &otp, nil
 }
 

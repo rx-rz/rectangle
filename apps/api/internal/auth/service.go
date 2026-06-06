@@ -95,7 +95,7 @@ func (s *AuthService) SendOTP(ctx context.Context, input SendOTPParams) error {
 		return err
 	}
 	if existingUser == nil {
-		return ErrOTPNotFound
+		return apperror.NotFound("otp not found")
 	}
 
 	otpHash := helpers.HashOTPCode(otp, s.cfg.OtpSecret)
@@ -113,21 +113,27 @@ func (s *AuthService) SendOTP(ctx context.Context, input SendOTPParams) error {
 }
 
 func (s *AuthService) VerifyOTP(ctx context.Context, input VerifyOTPParams) error {
+	s.logger.Log(ctx, slog.LevelInfo, "sup")
 	dbOtp, err := s.otpRepo.GetOTPByEmail(ctx, input.Email, OTPPurposeEmailVerification)
+
 	if err != nil {
+		s.logger.Log(ctx, slog.LevelError, err.Error())
+		if errors.Is(err, ErrOTPNotFound) {
+			return apperror.NotFound("otp not found")
+		}
 		return err
 	}
 	if time.Now().After(dbOtp.ExpiresAt) {
-		return ErrOTPExpired
+		return apperror.BadRequest("otp expired")
 	}
 	if dbOtp.Attempts >= 5 {
-		return ErrOTPTooManyAttempts
+		return apperror.New("TOO_MANY_OTP_ATTEMPTS", "too many otp attempts", 429)
 	}
 	if !helpers.VerifyOTPCode(input.Code, dbOtp.OtpHash, s.cfg.OtpSecret) {
 		if err := s.otpRepo.IncrementOTPAttempts(ctx, dbOtp.ID); err != nil {
 			return err
 		}
-		return ErrOTPInvalid
+		return apperror.BadRequest("otp invalid")
 	}
 	err = s.otpRepo.VerifyEmailWithOTP(ctx, dbOtp.UserID)
 	if err != nil {
