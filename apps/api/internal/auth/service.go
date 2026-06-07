@@ -92,6 +92,34 @@ func (s *AuthService) SignupWithEmail(ctx context.Context, input EmailSignupInpu
 
 }
 
+func (s *AuthService) LoginWithEmail(ctx context.Context, input EmailLoginInput) (*user.User, error) {
+	existingUser, err := s.userRepo.FindByEmail(ctx, input.Email)
+	if err != nil {
+		return nil, err
+	}
+	if existingUser == nil {
+		return nil, apperror.Unauthorized("invalid email or password")
+	}
+
+	passwordHash, err := s.userRepo.GetPasswordHashByEmail(ctx, input.Email)
+	if err != nil {
+		return nil, err
+	}
+	err = helpers.NewHasher().Compare(passwordHash, input.Password)
+	if err != nil {
+		switch {
+		case errors.Is(err, helpers.ErrInvalidPassword):
+			return nil, apperror.Unauthorized("invalid email or password")
+		case errors.Is(err, helpers.ErrInvalidHash):
+			return nil, apperror.Internal()
+		default:
+			return nil, apperror.Internal()
+		}
+	}
+
+	return existingUser, nil
+}
+
 func (s *AuthService) SendOTP(ctx context.Context, input SendOTPParams) error {
 	otp, err := helpers.GenerateOTP()
 	if err != nil {

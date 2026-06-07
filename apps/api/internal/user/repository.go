@@ -72,7 +72,7 @@ func (r *Repository) GetPasswordHashByEmail(ctx context.Context, email string) (
 	query := `
 	SELECT password_hash
 	FROM users
-	WHERE email = $1
+	WHERE lower(email) = lower($1)
 	`
 
 	var passwordHash string

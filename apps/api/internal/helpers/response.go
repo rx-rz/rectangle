@@ -17,6 +17,19 @@ const MAX_JSON_BODY_SIZE = 1_048_576
 // Envelope is the standard top-level shape for JSON responses.
 type Envelope map[string]any
 
+func successEnvelope(data any, message string) Envelope {
+	envelope := Envelope{
+		"status": "success",
+	}
+	if data != nil {
+		envelope["data"] = data
+	}
+	if message != "" {
+		envelope["message"] = message
+	}
+	return envelope
+}
+
 // WriteJSON marshals data as an indented JSON response with the given status and headers.
 func WriteJSON(w http.ResponseWriter, status int, data Envelope, headers http.Header) error {
 	js, err := json.MarshalIndent(data, "", "\t")
@@ -33,6 +46,14 @@ func WriteJSON(w http.ResponseWriter, status int, data Envelope, headers http.He
 
 	_, err = w.Write(js)
 	return err
+}
+
+func WriteData(w http.ResponseWriter, status int, data any, headers http.Header) error {
+	return WriteJSON(w, status, successEnvelope(data, ""), headers)
+}
+
+func WriteMessage(w http.ResponseWriter, status int, message string, headers http.Header) error {
+	return WriteJSON(w, status, successEnvelope(nil, message), headers)
 }
 
 // ReadJSON decodes a single JSON value from the request body into dst.
@@ -95,7 +116,13 @@ func ReadJSON(w http.ResponseWriter, r *http.Request, dst any) error {
 
 func WriteError(w http.ResponseWriter, err error) error {
 	appErr := apperror.Convert(err)
+	status := "error"
+	if appErr.Status < http.StatusInternalServerError {
+		status = "fail"
+	}
+
 	return WriteJSON(w, appErr.Status, Envelope{
+		"status": status,
 		"error": Envelope{
 			"code":    appErr.Code,
 			"message": appErr.Message,

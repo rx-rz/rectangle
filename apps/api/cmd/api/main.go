@@ -53,9 +53,10 @@ func main() {
 	})
 
 	apiServer := server.New(server.Options{
-		Port:        cfg.Port,
-		AuthService: authService,
-		Logger:      appLogger,
+		Port:               cfg.Port,
+		AuthService:        authService,
+		Logger:             appLogger,
+		CORSAllowedOrigins: cfg.CORSAllowedOrigins,
 	})
 
 	shutdownErr := make(chan error, 1)

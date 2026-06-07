@@ -7,7 +7,7 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  --radius: 0rem;
+  --radius: 1rem;
 
   --rect-black: #08090a;
   --rect-black-2: #0a0b0c;
@@ -187,21 +187,10 @@
   }
 
   html {
-    @apply dark;
+    color-scheme: dark;
+
   }
 
-  body {
-    background:
-      radial-gradient(circle at top left, rgba(255, 255, 255, 0.035), transparent 34rem),
-      linear-gradient(180deg, #0a0b0c 0%, #08090a 100%);
-    color: var(--foreground);
-    font-family: var(--font-mono);
-  }
-
-  ::selection {
-    background: var(--rect-yellow);
-    color: var(--rect-black);
-  }
 
   input,
   textarea,

@@ -12,6 +12,7 @@ type Config struct {
 	AppEnv             string
 	Port               int
 	DbUrl              string
+	CORSAllowedOrigins string
 	OtpSecret          string
 	MailerApiKey       string
 	MailerFrom         string
@@ -58,6 +59,7 @@ func Load() (Config, error) {
 		AppEnv:             getString("APP_ENV", "development"),
 		Port:               port,
 		DbUrl:              getDatabaseURL(),
+		CORSAllowedOrigins: getString("CORS_ALLOWED_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000"),
 		OtpSecret:          getString("OTP_HASH_SECRET", ""),
 		MailerApiKey:       getString("MAILER_API_KEY", ""),
 		MailerFrom:         getString("MAILER_FROM", ""),

@@ -45,13 +45,37 @@ func (h *Handler) SignupWithEmail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = helpers.WriteJSON(w, http.StatusCreated, helpers.Envelope{
-		"data": AuthResponse{
-			User: user.ToUserResponse(*createdUser),
-		},
+	err = helpers.WriteData(w, http.StatusCreated, AuthResponse{
+		User: user.ToUserResponse(*createdUser),
 	}, nil)
 	if err != nil {
 		h.logger.Error("failed to write signup response", "error", err)
+	}
+}
+
+func (h *Handler) LoginWithEmail(w http.ResponseWriter, r *http.Request) {
+	var input EmailLoginInput
+	if err := helpers.ReadJSON(w, r, &input); err != nil {
+		helpers.WriteError(w, apperror.BadRequest(err.Error()))
+		return
+	}
+
+	if err := helpers.ValidateStruct(input); err != nil {
+		helpers.WriteError(w, err)
+		return
+	}
+
+	loggedInUser, err := h.service.LoginWithEmail(r.Context(), input)
+	if err != nil {
+		helpers.WriteError(w, err)
+		return
+	}
+
+	err = helpers.WriteData(w, http.StatusOK, AuthResponse{
+		User: user.ToUserResponse(*loggedInUser),
+	}, nil)
+	if err != nil {
+		h.logger.Error("failed to write login response", "error", err)
 	}
 }
 
@@ -75,9 +99,7 @@ func (h *Handler) SendOTP(w http.ResponseWriter, r *http.Request) {
 		helpers.WriteError(w, err)
 		return
 	}
-	err = helpers.WriteJSON(w, http.StatusCreated, helpers.Envelope{
-		"message": "OTP sent successfully",
-	}, nil)
+	err = helpers.WriteMessage(w, http.StatusCreated, "OTP sent successfully", nil)
 	if err != nil {
 		h.logger.Error("failed to write response", "error", err)
 	}
@@ -112,7 +134,8 @@ func (h *Handler) VerifyOTP(w http.ResponseWriter, r *http.Request) {
 		helpers.WriteError(w, err)
 		return
 	}
-	err = helpers.WriteJSON(w, http.StatusOK, helpers.Envelope{
-		"message": "otp verified successfully. your email is now verified",
-	}, nil)
+	err = helpers.WriteMessage(w, http.StatusOK, "otp verified successfully. your email is now verified", nil)
+	if err != nil {
+		h.logger.Error("failed to write response", "error", err)
+	}
 }
