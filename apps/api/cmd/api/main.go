@@ -16,6 +16,8 @@ import (
 	"rx-rz/rectangle-api/platform/mail"
 	"syscall"
 	"time"
+
+	"github.com/jmoiron/sqlx"
 )
 
 func main() {
@@ -32,7 +34,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	defer database.Close()
+	defer func(database *sqlx.DB) {
+		err := database.Close()
+		if err != nil {
+			appLogger.Error("db closing failed", "error", err)
+		}
+	}(database)
 
 	userRepo := user.NewRepository(database)
 	authRepo := auth.NewRepository(database)
