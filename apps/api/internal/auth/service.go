@@ -8,6 +8,7 @@ import (
 	"rx-rz/rectangle-api/internal/config"
 	"rx-rz/rectangle-api/internal/helpers"
 	"rx-rz/rectangle-api/internal/user"
+	"rx-rz/rectangle-api/platform/mail"
 	"time"
 )
 
@@ -28,13 +29,20 @@ type OTPRepository interface {
 type AuthService struct {
 	userRepo UserRepository
 	otpRepo  OTPRepository
+	mailer   OTPMailer
 	cfg      config.Config
 	logger   *slog.Logger
+}
+
+type OTPMailer interface {
+	SendOTPMail(ctx context.Context, data mail.OTPEmailParams, to string) error
+	SplitOTP(code string) mail.OTPDigits
 }
 
 type ServiceOptions struct {
 	UserRepository UserRepository
 	OTPRepository  OTPRepository
+	Mailer         OTPMailer
 	Config         config.Config
 	Logger         *slog.Logger
 }
@@ -43,6 +51,7 @@ func NewService(opts ServiceOptions) *AuthService {
 	return &AuthService{
 		userRepo: opts.UserRepository,
 		otpRepo:  opts.OTPRepository,
+		mailer:   opts.Mailer,
 		cfg:      opts.Config,
 		logger:   opts.Logger,
 	}
@@ -85,7 +94,6 @@ func (s *AuthService) SignupWithEmail(ctx context.Context, input EmailSignupInpu
 
 func (s *AuthService) SendOTP(ctx context.Context, input SendOTPParams) error {
 	otp, err := helpers.GenerateOTP()
-	s.logger.Log(ctx, slog.LevelInfo, otp)
 	if err != nil {
 		return err
 	}
@@ -109,7 +117,19 @@ func (s *AuthService) SendOTP(ctx context.Context, input SendOTPParams) error {
 		s.logger.Log(ctx, slog.LevelError, err.Error())
 		return err
 	}
-	return nil
+	if s.mailer == nil {
+		return apperror.Internal()
+	}
+	return s.mailer.SendOTPMail(ctx, mail.OTPEmailParams{
+		Digits:       s.mailer.SplitOTP(otp),
+		Device:       fallback(input.Device, "Unknown device"),
+		RequestedAt:  time.Now().Format("Jan 2, 2006 at 15:04 MST"),
+		IPAddress:    fallback(input.IPAddress, "Unavailable"),
+		Region:       fallback(input.Region, "Unavailable"),
+		DashboardURL: s.cfg.MailerDashboardURL,
+		DocsURL:      s.cfg.MailerDocsURL,
+		SupportURL:   s.cfg.MailerSupportURL,
+	}, existingUser.Email)
 }
 
 func (s *AuthService) VerifyOTP(ctx context.Context, input VerifyOTPParams) error {
@@ -140,4 +160,11 @@ func (s *AuthService) VerifyOTP(ctx context.Context, input VerifyOTPParams) erro
 		return err
 	}
 	return nil
+}
+
+func fallback(value, fallbackValue string) string {
+	if value == "" {
+		return fallbackValue
+	}
+	return value
 }

@@ -2,10 +2,12 @@ package auth
 
 import (
 	"log/slog"
+	"net"
 	"net/http"
 	"rx-rz/rectangle-api/internal/apperror"
 	"rx-rz/rectangle-api/internal/helpers"
 	"rx-rz/rectangle-api/internal/user"
+	"strings"
 )
 
 type Handler struct {
@@ -63,7 +65,12 @@ func (h *Handler) SendOTP(w http.ResponseWriter, r *http.Request) {
 		helpers.WriteError(w, err)
 		return
 	}
-	err := h.service.SendOTP(r.Context(), SendOTPParams{Email: input.Email})
+	err := h.service.SendOTP(r.Context(), SendOTPParams{
+		Email:     input.Email,
+		Device:    r.UserAgent(),
+		IPAddress: clientIP(r),
+		Region:    "Unavailable",
+	})
 	if err != nil {
 		helpers.WriteError(w, err)
 		return
@@ -74,6 +81,20 @@ func (h *Handler) SendOTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		h.logger.Error("failed to write response", "error", err)
 	}
+}
+
+func clientIP(r *http.Request) string {
+	if forwardedFor := r.Header.Get("X-Forwarded-For"); forwardedFor != "" {
+		return strings.TrimSpace(strings.Split(forwardedFor, ",")[0])
+	}
+	if realIP := r.Header.Get("X-Real-IP"); realIP != "" {
+		return strings.TrimSpace(realIP)
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
 }
 
 func (h *Handler) VerifyOTP(w http.ResponseWriter, r *http.Request) {

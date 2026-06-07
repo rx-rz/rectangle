@@ -9,10 +9,15 @@ import (
 )
 
 type Config struct {
-	AppEnv    string
-	Port      int
-	DbUrl     string
-	OtpSecret string
+	AppEnv             string
+	Port               int
+	DbUrl              string
+	OtpSecret          string
+	MailerApiKey       string
+	MailerFrom         string
+	MailerDashboardURL string
+	MailerDocsURL      string
+	MailerSupportURL   string
 }
 
 func getString(key, fallback string) string {
@@ -50,10 +55,15 @@ func Load() (Config, error) {
 	}
 
 	cfg := Config{
-		AppEnv:    getString("APP_ENV", "development"),
-		Port:      port,
-		DbUrl:     getDatabaseURL(),
-		OtpSecret: getString("OTP_HASH_SECRET", ""),
+		AppEnv:             getString("APP_ENV", "development"),
+		Port:               port,
+		DbUrl:              getDatabaseURL(),
+		OtpSecret:          getString("OTP_HASH_SECRET", ""),
+		MailerApiKey:       getString("MAILER_API_KEY", ""),
+		MailerFrom:         getString("MAILER_FROM", ""),
+		MailerDashboardURL: getString("MAILER_DASHBOARD_URL", ""),
+		MailerDocsURL:      getString("MAILER_DOCS_URL", ""),
+		MailerSupportURL:   getString("MAILER_SUPPORT_URL", ""),
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -90,6 +100,14 @@ func (c Config) Validate() error {
 
 	if c.OtpSecret == "" {
 		return fmt.Errorf("OTP_HASH_SECRET is required")
+	}
+
+	if c.MailerApiKey == "" {
+		return fmt.Errorf("MAILER_API_KEY is required")
+	}
+
+	if c.MailerFrom == "" {
+		return fmt.Errorf("MAILER_FROM is required")
 	}
 
 	return nil

@@ -13,6 +13,7 @@ import (
 	"rx-rz/rectangle-api/internal/server"
 	"rx-rz/rectangle-api/internal/user"
 	"rx-rz/rectangle-api/platform/logger"
+	"rx-rz/rectangle-api/platform/mail"
 	"syscall"
 	"time"
 )
@@ -35,9 +36,11 @@ func main() {
 
 	userRepo := user.NewRepository(database)
 	authRepo := auth.NewRepository(database)
+	mailer := mail.NewMailer(cfg)
 	authService := auth.NewService(auth.ServiceOptions{
 		UserRepository: userRepo,
 		OTPRepository:  authRepo,
+		Mailer:         mailer,
 		Config:         cfg,
 		Logger:         appLogger,
 	})

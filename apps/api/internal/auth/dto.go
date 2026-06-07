@@ -23,7 +23,10 @@ type SendOTPInput struct {
 }
 
 type SendOTPParams struct {
-	Email string
+	Email     string
+	Device    string
+	IPAddress string
+	Region    string
 }
 
 type VerifyOTPParams struct {
