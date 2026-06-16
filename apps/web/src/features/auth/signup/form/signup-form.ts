@@ -1,7 +1,7 @@
 import { type SubmitHandler, useForm } from "@formisch/react";
 import { useNavigate } from "@tanstack/react-router";
 import * as v from "valibot";
-import { useGetOTPApi, useSignupWithEmailApi } from "#/api/auth";
+import { useSendOTPApi, useSignupWithEmailApi } from "#/api/auth";
 export const SignupSchema = v.pipe(
 	v.object({
 		name: v.pipe(
@@ -35,7 +35,7 @@ export const SignupSchema = v.pipe(
 export const useSignupForm = () => {
 	const navigate = useNavigate();
 	const signupMutation = useSignupWithEmailApi();
-	const getOTPMutation = useGetOTPApi();
+	const getOTPMutation = useSendOTPApi();
 	const signupForm = useForm({
 		schema: SignupSchema,
 		initialInput: {

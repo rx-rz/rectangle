@@ -19,6 +19,10 @@ type Config struct {
 	MailerDashboardURL string
 	MailerDocsURL      string
 	MailerSupportURL   string
+	WebAppURL          string
+	GoogleClientID     string
+	GoogleRedirectURI  string
+	GoogleClientSecret string
 }
 
 func getString(key, fallback string) string {
@@ -66,6 +70,10 @@ func Load() (Config, error) {
 		MailerDashboardURL: getString("MAILER_DASHBOARD_URL", ""),
 		MailerDocsURL:      getString("MAILER_DOCS_URL", ""),
 		MailerSupportURL:   getString("MAILER_SUPPORT_URL", ""),
+		WebAppURL:          getString("WEB_APP_URL", "http://localhost:3000"),
+		GoogleClientID:     getString("GOOGLE_CLIENT_ID", ""),
+		GoogleRedirectURI:  getString("GOOGLE_REDIRECT_URI", ""),
+		GoogleClientSecret: getString("GOOGLE_CLIENT_SECRET", ""),
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -110,6 +118,35 @@ func (c Config) Validate() error {
 
 	if c.MailerFrom == "" {
 		return fmt.Errorf("MAILER_FROM is required")
+	}
+
+	if c.WebAppURL == "" {
+		return fmt.Errorf("WEB_APP_URL is required")
+	}
+
+	parsedWebAppURL, err := url.Parse(c.WebAppURL)
+	if err != nil {
+		return fmt.Errorf("WEB_APP_URL is invalid: %w", err)
+	}
+
+	if parsedWebAppURL.Scheme != "http" && parsedWebAppURL.Scheme != "https" {
+		return fmt.Errorf("WEB_APP_URL must use http:// or https://")
+	}
+
+	if parsedWebAppURL.Host == "" {
+		return fmt.Errorf("WEB_APP_URL must include a host")
+	}
+
+	if c.GoogleClientID == "" {
+		return fmt.Errorf("GOOGLE_CLIENT_ID is required")
+	}
+
+	if c.GoogleClientSecret == "" {
+		return fmt.Errorf("GOOGLE_CLIENT_SECRET is required")
+	}
+
+	if c.GoogleRedirectURI == "" {
+		return fmt.Errorf("GOOGLE_REDIRECT_URI is required")
 	}
 
 	return nil

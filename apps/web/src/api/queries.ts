@@ -6,7 +6,8 @@ import {
 export const authKeys = createQueryKeys("auth", {
 	signupWithEmail: null,
 	loginWithEmail: null,
-	getOTP: null,
+	sendOTP: null,
+	getGoogleOauthLink: null,
 	verifyOTP: null,
 });
 

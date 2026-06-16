@@ -129,3 +129,12 @@ func WriteError(w http.ResponseWriter, err error) error {
 		},
 	}, nil)
 }
+
+func ReadCookie(r *http.Request, name string) (string, error) {
+	cookie, err := r.Cookie(name)
+	if err != nil {
+		return "", err
+	}
+
+	return cookie.Value, nil
+}

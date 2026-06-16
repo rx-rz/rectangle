@@ -2,6 +2,9 @@ package auth
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"errors"
 	"log/slog"
 	"rx-rz/rectangle-api/internal/apperror"
@@ -23,15 +26,25 @@ type OTPRepository interface {
 	CreateOTP(ctx context.Context, params CreateOTPParams) error
 	GetOTPByEmail(ctx context.Context, email string, purpose OTPPurpose) (*OTP, error)
 	IncrementOTPAttempts(ctx context.Context, otpID int64) error
-	VerifyEmailWithOTP(ctx context.Context, userID string) error
+	VerifyEmailWithOTP(ctx context.Context, userID string) (*user.User, error)
+}
+
+type OAuthRepository interface {
+	FindOrCreateOAuthUserWithSession(ctx context.Context, params CreateOAuthSessionParams) (*SessionResult, error)
+}
+
+type SessionRepository interface {
+	CreateSession(ctx context.Context, params CreateSessionParams) (*Session, error)
 }
 
 type AuthService struct {
-	userRepo UserRepository
-	otpRepo  OTPRepository
-	mailer   OTPMailer
-	cfg      config.Config
-	logger   *slog.Logger
+	userRepo    UserRepository
+	otpRepo     OTPRepository
+	oauthRepo   OAuthRepository
+	sessionRepo SessionRepository
+	mailer      OTPMailer
+	cfg         config.Config
+	logger      *slog.Logger
 }
 
 type OTPMailer interface {
@@ -40,20 +53,24 @@ type OTPMailer interface {
 }
 
 type ServiceOptions struct {
-	UserRepository UserRepository
-	OTPRepository  OTPRepository
-	Mailer         OTPMailer
-	Config         config.Config
-	Logger         *slog.Logger
+	UserRepository    UserRepository
+	OTPRepository     OTPRepository
+	OAuthRepository   OAuthRepository
+	SessionRepository SessionRepository
+	Mailer            OTPMailer
+	Config            config.Config
+	Logger            *slog.Logger
 }
 
 func NewService(opts ServiceOptions) *AuthService {
 	return &AuthService{
-		userRepo: opts.UserRepository,
-		otpRepo:  opts.OTPRepository,
-		mailer:   opts.Mailer,
-		cfg:      opts.Config,
-		logger:   opts.Logger,
+		userRepo:    opts.UserRepository,
+		otpRepo:     opts.OTPRepository,
+		oauthRepo:   opts.OAuthRepository,
+		sessionRepo: opts.SessionRepository,
+		mailer:      opts.Mailer,
+		cfg:         opts.Config,
+		logger:      opts.Logger,
 	}
 }
 
@@ -92,7 +109,7 @@ func (s *AuthService) SignupWithEmail(ctx context.Context, input EmailSignupInpu
 
 }
 
-func (s *AuthService) LoginWithEmail(ctx context.Context, input EmailLoginInput) (*user.User, error) {
+func (s *AuthService) LoginWithEmail(ctx context.Context, input EmailLoginInput) (*SessionResult, error) {
 	existingUser, err := s.userRepo.FindByEmail(ctx, input.Email)
 	if err != nil {
 		return nil, err
@@ -116,8 +133,11 @@ func (s *AuthService) LoginWithEmail(ctx context.Context, input EmailLoginInput)
 			return nil, apperror.Internal()
 		}
 	}
+	if !existingUser.EmailVerifiedAt.Valid {
+		return nil, apperror.Unauthorized("email is not verified")
+	}
 
-	return existingUser, nil
+	return s.createSessionResult(ctx, existingUser, input.UserAgent, input.IPAddress)
 }
 
 func (s *AuthService) SendOTP(ctx context.Context, input SendOTPParams) error {
@@ -160,34 +180,109 @@ func (s *AuthService) SendOTP(ctx context.Context, input SendOTPParams) error {
 	}, existingUser.Email)
 }
 
-func (s *AuthService) VerifyOTP(ctx context.Context, input VerifyOTPParams) error {
-	s.logger.Log(ctx, slog.LevelInfo, "sup")
+func (s *AuthService) VerifyOTP(ctx context.Context, input VerifyOTPParams) (*SessionResult, error) {
 	dbOtp, err := s.otpRepo.GetOTPByEmail(ctx, input.Email, OTPPurposeEmailVerification)
 
 	if err != nil {
 		s.logger.Log(ctx, slog.LevelError, err.Error())
 		if errors.Is(err, ErrOTPNotFound) {
-			return apperror.NotFound("otp not found")
+			return nil, apperror.NotFound("otp not found")
 		}
-		return err
+		return nil, err
 	}
 	if time.Now().After(dbOtp.ExpiresAt) {
-		return apperror.BadRequest("otp expired")
+		return nil, apperror.BadRequest("otp expired")
 	}
 	if dbOtp.Attempts >= 5 {
-		return apperror.New("TOO_MANY_OTP_ATTEMPTS", "too many otp attempts", 429)
+		return nil, apperror.New("TOO_MANY_OTP_ATTEMPTS", "too many otp attempts", 429)
 	}
 	if !helpers.VerifyOTPCode(input.Code, dbOtp.OtpHash, s.cfg.OtpSecret) {
 		if err := s.otpRepo.IncrementOTPAttempts(ctx, dbOtp.ID); err != nil {
-			return err
+			return nil, err
 		}
-		return apperror.BadRequest("otp invalid")
+		return nil, apperror.BadRequest("otp invalid")
 	}
-	err = s.otpRepo.VerifyEmailWithOTP(ctx, dbOtp.UserID)
+	verifiedUser, err := s.otpRepo.VerifyEmailWithOTP(ctx, dbOtp.UserID)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return nil
+	return s.createSessionResult(ctx, verifiedUser, input.UserAgent, input.IPAddress)
+}
+
+func (s *AuthService) LoginWithGoogle(ctx context.Context, input GoogleOAuthInput) (*SessionResult, error) {
+	if !input.EmailVerified {
+		return nil, apperror.Unauthorized("google email is not verified")
+	}
+	if s.oauthRepo == nil {
+		return nil, apperror.Internal()
+	}
+
+	token, tokenHash, err := newSessionToken()
+	if err != nil {
+		return nil, err
+	}
+
+	result, err := s.oauthRepo.FindOrCreateOAuthUserWithSession(ctx, CreateOAuthSessionParams{
+		UserID:         helpers.NewUserID(),
+		SessionID:      helpers.NewSessionID(),
+		Provider:       OAuthProviderGoogle,
+		ProviderUserID: input.ProviderUserID,
+		Email:          input.Email,
+		Name:           input.Name,
+		AvatarURL:      input.AvatarURL,
+		TokenHash:      tokenHash,
+		UserAgent:      input.UserAgent,
+		IPAddress:      input.IPAddress,
+		ExpiresAt:      time.Now().Add(30 * 24 * time.Hour),
+	})
+	if err != nil {
+		if errors.Is(err, ErrOAuthAccountLinked) {
+			return nil, apperror.Conflict("oauth account already linked")
+		}
+		return nil, err
+	}
+	result.Token = token
+	return result, nil
+}
+
+func (s *AuthService) createSessionResult(ctx context.Context, dbUser *user.User, userAgent string, ipAddress string) (*SessionResult, error) {
+	if s.sessionRepo == nil {
+		return nil, apperror.Internal()
+	}
+
+	token, tokenHash, err := newSessionToken()
+	if err != nil {
+		return nil, err
+	}
+
+	session, err := s.sessionRepo.CreateSession(ctx, CreateSessionParams{
+		SessionID: helpers.NewSessionID(),
+		UserID:    dbUser.ID,
+		TokenHash: tokenHash,
+		UserAgent: userAgent,
+		IPAddress: ipAddress,
+		ExpiresAt: time.Now().Add(30 * 24 * time.Hour),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return &SessionResult{
+		User:    *dbUser,
+		Session: *session,
+		Token:   token,
+	}, nil
+}
+
+func newSessionToken() (string, []byte, error) {
+	tokenBytes := make([]byte, 32)
+	if _, err := rand.Read(tokenBytes); err != nil {
+		return "", nil, err
+	}
+
+	token := base64.RawURLEncoding.EncodeToString(tokenBytes)
+	hash := sha256.Sum256([]byte(token))
+	return token, hash[:], nil
 }
 
 func fallback(value, fallbackValue string) string {

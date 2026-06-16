@@ -1,7 +1,7 @@
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { REGEXP_ONLY_DIGITS } from "input-otp";
 import { useEffect, useState } from "react";
-import { useGetOTPApi, useVerifyOTPApi } from "#/api/auth";
+import { useSendOTPApi, useVerifyOTPApi } from "#/api/auth";
 import { Button } from "#/components/ui/button";
 import {
 	InputOTP,
@@ -18,7 +18,7 @@ export const EmailVerification = () => {
 	const [otpCode, setOtpCode] = useState("");
 	const [resendCooldown, setResendCooldown] = useState(RESEND_COOLDOWN);
 	const verifyOTPMutation = useVerifyOTPApi();
-	const getOTPMutation = useGetOTPApi();
+	const getOTPMutation = useSendOTPApi();
 
 	const canResend = resendCooldown === 0;
 	const error = verifyOTPMutation.error ?? getOTPMutation.error;
@@ -47,7 +47,7 @@ export const EmailVerification = () => {
 
 		try {
 			await verifyOTPMutation.mutateAsync({ email, code: otpCode });
-			await navigate({ to: "/auth/login" });
+			await navigate({ to: "/" });
 		} catch {
 			return;
 		}

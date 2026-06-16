@@ -4,11 +4,19 @@ import (
 	"time"
 )
 
+type OauthSignupInput struct {
+	Name      *string `json:"name,omitempty" validate:"omitempty,min=2,max=255"`
+	AvatarURL *string `json:"avatar_url,omitempty" validate:"omitempty,min=2"`
+	Email     string  `json:"email" validate:"required,email,max=255"`
+	Password  string  `json:"password" validate:"required,min=8,max=72"`
+}
+
 type CreateUserParams struct {
 	ID           string
 	Name         *string
 	Email        string
 	PasswordHash string
+	AvatarURL    *string
 }
 
 type UpdateUserParams struct {

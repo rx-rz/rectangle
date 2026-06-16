@@ -1,6 +1,15 @@
 package auth
 
-import "time"
+import (
+	"database/sql"
+	"time"
+)
+
+type OAuthProvider string
+
+const (
+	OAuthProviderGoogle OAuthProvider = "google"
+)
 
 type OTPPurpose string
 
@@ -18,4 +27,13 @@ type OTP struct {
 	ExpiresAt time.Time  `db:"expires_at"`
 	CreatedAt time.Time  `db:"created_at"`
 	Attempts  int        `db:"attempts"`
+}
+
+type Session struct {
+	ID        string         `db:"id"`
+	UserID    string         `db:"user_id"`
+	UserAgent sql.NullString `db:"user_agent"`
+	IPAddress sql.NullString `db:"ip_address"`
+	ExpiresAt time.Time      `db:"expires_at"`
+	CreatedAt time.Time      `db:"created_at"`
 }

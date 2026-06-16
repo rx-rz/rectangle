@@ -3,18 +3,27 @@ import { type UseMutationOptions, useMutation } from "@tanstack/react-query";
 import { API_ROUTES } from "../api-routes";
 import { type APIError, api } from "../index";
 import { queries } from "../queries";
+import type { SignupWithEmailResponse } from "./signup-with-email";
 
 export type VerifyOTPInput = {
 	email: string;
 	code: string;
 };
 
-type Options = UseMutationOptions<string | undefined, APIError, VerifyOTPInput>;
+type Options = UseMutationOptions<
+	SignupWithEmailResponse,
+	APIError,
+	VerifyOTPInput
+>;
 
 export const verifyOTPApi = async (data: VerifyOTPInput) => {
-	return await api.message(API_ROUTES.auth.otp.verify, "POST", {
-		json: data,
-	});
+	return await api.request<SignupWithEmailResponse>(
+		API_ROUTES.auth.otp.verify,
+		"POST",
+		{
+			json: data,
+		},
+	);
 };
 
 export const useVerifyOTPApi = (options?: Options) => {

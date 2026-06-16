@@ -53,6 +53,8 @@ func registerRoutes(opts routeOptions) {
 	opts.Mux.HandleFunc("POST /auth/login/email", opts.AuthHandler.LoginWithEmail)
 	opts.Mux.HandleFunc("POST /auth/otp/send", opts.AuthHandler.SendOTP)
 	opts.Mux.HandleFunc("POST /auth/otp/verify", opts.AuthHandler.VerifyOTP)
+	opts.Mux.HandleFunc("GET /auth/google/start", opts.AuthHandler.StartGoogleOauth)
+	opts.Mux.HandleFunc("GET /auth/google/callback", opts.AuthHandler.HandleGoogleOauth)
 }
 
 func corsMiddleware(next http.Handler, allowedOrigins string) http.Handler {

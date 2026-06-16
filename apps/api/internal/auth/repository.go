@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"log/slog"
+	"rx-rz/rectangle-api/internal/user"
 
 	"github.com/jmoiron/sqlx"
 )
@@ -12,6 +13,8 @@ import (
 type Repository struct {
 	db *sqlx.DB
 }
+
+var ErrOAuthAccountLinked = errors.New("oauth account already linked to another user")
 
 func NewRepository(db *sqlx.DB) *Repository {
 	return &Repository{db: db}
@@ -68,22 +71,23 @@ func (r *Repository) IncrementOTPAttempts(ctx context.Context, otpID int64) erro
 	return err
 }
 
-func (r *Repository) VerifyEmailWithOTP(ctx context.Context, userID string) error {
+func (r *Repository) VerifyEmailWithOTP(ctx context.Context, userID string) (*user.User, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer tx.Rollback()
 
-	_, err = tx.ExecContext(ctx, `
+	var dbUser user.User
+	err = tx.QueryRowxContext(ctx, `
 		UPDATE users
-		SET email_verified_at = now(),
+		SET email_verified_at = COALESCE(email_verified_at, now()),
 			updated_at = now()
 		WHERE id = $1
-		AND email_verified_at IS NULL
-	`, userID)
+		RETURNING id, name, email, avatar_url, email_verified_at, created_at
+	`, userID).StructScan(&dbUser)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	_, err = tx.ExecContext(ctx, `
 		DELETE FROM otps
@@ -91,7 +95,154 @@ func (r *Repository) VerifyEmailWithOTP(ctx context.Context, userID string) erro
 		AND purpose = 'email_verification'
 	`, userID)
 	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return &dbUser, nil
+}
+
+func (r *Repository) FindOrCreateOAuthUserWithSession(ctx context.Context, params CreateOAuthSessionParams) (*SessionResult, error) {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	dbUser, err := findOAuthUser(ctx, tx, params.Provider, params.ProviderUserID)
+	if err != nil {
+		return nil, err
+	}
+
+	if dbUser == nil {
+		dbUser, err = createOAuthUser(ctx, tx, params)
+		if err != nil {
+			return nil, err
+		}
+		if err := linkOAuthAccount(ctx, tx, params.Provider, params.ProviderUserID, dbUser.ID); err != nil {
+			return nil, err
+		}
+	}
+
+	session, err := createSession(ctx, tx, params, dbUser.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+
+	return &SessionResult{
+		User:    *dbUser,
+		Session: *session,
+	}, nil
+}
+
+func findOAuthUser(ctx context.Context, tx *sqlx.Tx, provider OAuthProvider, providerUserID string) (*user.User, error) {
+	query := `
+	SELECT users.id, users.name, users.email, users.avatar_url, users.email_verified_at, users.created_at
+	FROM oauth_accounts
+	JOIN users ON users.id = oauth_accounts.user_id
+	WHERE oauth_accounts.provider = $1
+		AND oauth_accounts.provider_user_id = $2
+	`
+
+	var dbUser user.User
+	if err := tx.GetContext(ctx, &dbUser, query, provider, providerUserID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &dbUser, nil
+}
+
+func createOAuthUser(ctx context.Context, tx *sqlx.Tx, params CreateOAuthSessionParams) (*user.User, error) {
+	query := `
+	INSERT INTO users (id, name, email, avatar_url, email_verified_at)
+	VALUES ($1, $2, $3, $4, now())
+	RETURNING id, name, email, avatar_url, email_verified_at, created_at
+	`
+
+	var dbUser user.User
+	if err := tx.QueryRowxContext(
+		ctx,
+		query,
+		params.UserID,
+		params.Name,
+		params.Email,
+		params.AvatarURL,
+	).StructScan(&dbUser); err != nil {
+		return nil, err
+	}
+	return &dbUser, nil
+}
+
+func linkOAuthAccount(ctx context.Context, tx *sqlx.Tx, provider OAuthProvider, providerUserID, userID string) error {
+	query := `
+	INSERT INTO oauth_accounts (provider, provider_user_id, user_id)
+	VALUES ($1, $2, $3)
+	ON CONFLICT (provider, provider_user_id) DO NOTHING
+	`
+
+	result, err := tx.ExecContext(ctx, query, provider, providerUserID, userID)
+	if err != nil {
 		return err
 	}
-	return tx.Commit()
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 0 {
+		return ErrOAuthAccountLinked
+	}
+	return nil
+}
+
+func createSession(ctx context.Context, tx *sqlx.Tx, params CreateOAuthSessionParams, userID string) (*Session, error) {
+	query := `
+	INSERT INTO sessions (id, user_id, user_agent, token_hash, ip_address, expires_at)
+	VALUES ($1, $2, NULLIF($3, ''), $4, NULLIF($5, '')::inet, $6)
+	RETURNING id, user_id, user_agent, ip_address::text AS ip_address, expires_at, created_at
+	`
+
+	var session Session
+	if err := tx.QueryRowxContext(
+		ctx,
+		query,
+		params.SessionID,
+		userID,
+		params.UserAgent,
+		params.TokenHash,
+		params.IPAddress,
+		params.ExpiresAt,
+	).StructScan(&session); err != nil {
+		return nil, err
+	}
+	return &session, nil
+}
+
+func (r *Repository) CreateSession(ctx context.Context, params CreateSessionParams) (*Session, error) {
+	query := `
+	INSERT INTO sessions (id, user_id, user_agent, token_hash, ip_address, expires_at)
+	VALUES ($1, $2, NULLIF($3, ''), $4, NULLIF($5, '')::inet, $6)
+	RETURNING id, user_id, user_agent, ip_address::text AS ip_address, expires_at, created_at
+	`
+
+	var session Session
+	if err := r.db.QueryRowxContext(
+		ctx,
+		query,
+		params.SessionID,
+		params.UserID,
+		params.UserAgent,
+		params.TokenHash,
+		params.IPAddress,
+		params.ExpiresAt,
+	).StructScan(&session); err != nil {
+		return nil, err
+	}
+	return &session, nil
 }

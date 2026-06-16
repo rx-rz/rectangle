@@ -17,13 +17,13 @@ func NewRepository(db *sqlx.DB) *Repository {
 
 func (r *Repository) Create(ctx context.Context, params CreateUserParams) (*User, error) {
 	query := `
-	INSERT INTO users (id, name, email, password_hash)
-	VALUES ($1, $2, $3, $4)
+	INSERT INTO users (id, name, email, password_hash, avatar_url)
+	VALUES ($1, $2, $3, $4, $5)
 	RETURNING id, name, email, avatar_url, email_verified_at, created_at
 	`
 	var user User
 
-	args := []any{params.ID, params.Name, params.Email, params.PasswordHash}
+	args := []any{params.ID, params.Name, params.Email, params.PasswordHash, params.AvatarURL}
 	err := r.db.QueryRowxContext(ctx, query, args...).StructScan(&user)
 	if err != nil {
 		return nil, err

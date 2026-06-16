@@ -45,11 +45,13 @@ func main() {
 	authRepo := auth.NewRepository(database)
 	mailer := mail.NewMailer(cfg)
 	authService := auth.NewService(auth.ServiceOptions{
-		UserRepository: userRepo,
-		OTPRepository:  authRepo,
-		Mailer:         mailer,
-		Config:         cfg,
-		Logger:         appLogger,
+		UserRepository:    userRepo,
+		OTPRepository:     authRepo,
+		OAuthRepository:   authRepo,
+		SessionRepository: authRepo,
+		Mailer:            mailer,
+		Config:            cfg,
+		Logger:            appLogger,
 	})
 
 	apiServer := server.New(server.Options{

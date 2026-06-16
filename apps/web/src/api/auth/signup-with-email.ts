@@ -19,8 +19,14 @@ export type AuthUser = {
 	created_at: string;
 };
 
+export type AuthSession = {
+	id: string;
+	expires_at: string;
+};
+
 export type SignupWithEmailResponse = {
 	user: AuthUser;
+	session?: AuthSession | null;
 };
 
 type Options = UseMutationOptions<
