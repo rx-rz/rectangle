@@ -23,6 +23,9 @@ type Config struct {
 	GoogleClientID     string
 	GoogleRedirectURI  string
 	GoogleClientSecret string
+	GithubClientID     string
+	GithubRedirectURI  string
+	GithubClientSecret string
 }
 
 func getString(key, fallback string) string {
@@ -74,6 +77,9 @@ func Load() (Config, error) {
 		GoogleClientID:     getString("GOOGLE_CLIENT_ID", ""),
 		GoogleRedirectURI:  getString("GOOGLE_REDIRECT_URI", ""),
 		GoogleClientSecret: getString("GOOGLE_CLIENT_SECRET", ""),
+		GithubClientID:     getString("GITHUB_CLIENT_ID", ""),
+		GithubRedirectURI:  getString("GITHUB_REDIRECT_URI", ""),
+		GithubClientSecret: getString("GITHUB_CLIENT_SECRET", ""),
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -147,6 +153,18 @@ func (c Config) Validate() error {
 
 	if c.GoogleRedirectURI == "" {
 		return fmt.Errorf("GOOGLE_REDIRECT_URI is required")
+	}
+
+	if c.GithubClientID == "" {
+		return fmt.Errorf("GITHUB_CLIENT_ID is required")
+	}
+
+	if c.GithubClientSecret == "" {
+		return fmt.Errorf("GITHUB_CLIENT_SECRET is required")
+	}
+
+	if c.GithubRedirectURI == "" {
+		return fmt.Errorf("GITHUB_REDIRECT_URI is required")
 	}
 
 	return nil
