@@ -27,7 +27,7 @@ type SendOTPInput struct {
 	Email string `json:"email" validate:"required,email,max=255"`
 }
 
-type GoogleOauthLinkOutput struct {
+type OauthLinkOutput struct {
 	AuthURL string `json:"authUrl"`
 }
 
@@ -45,7 +45,7 @@ type VerifyOTPParams struct {
 	IPAddress string
 }
 
-type GoogleOAuthInput struct {
+type OAuthInput struct {
 	ProviderUserID string
 	Email          string
 	EmailVerified  bool
@@ -85,6 +85,11 @@ type CreateSessionParams struct {
 	ExpiresAt time.Time
 }
 
+type CurrentSessionResult struct {
+	User                user.User
+	HasGithubConnection bool
+}
+
 type SessionResult struct {
 	User    user.User
 	Session Session
@@ -99,4 +104,18 @@ type AuthSessionResponse struct {
 type AuthResponse struct {
 	User    user.UserResponse    `json:"user"`
 	Session *AuthSessionResponse `json:"session,omitempty"`
+}
+
+type GithubConnectionResponse struct {
+	Connected         bool `json:"connected"`
+	CanImportProjects bool `json:"can_import_projects"`
+}
+
+type ConnectionsResponse struct {
+	Github GithubConnectionResponse `json:"github"`
+}
+
+type MeResponse struct {
+	User        user.UserResponse   `json:"user"`
+	Connections ConnectionsResponse `json:"connections"`
 }

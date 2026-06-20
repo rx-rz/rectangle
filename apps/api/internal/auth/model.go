@@ -9,6 +9,7 @@ type OAuthProvider string
 
 const (
 	OAuthProviderGoogle OAuthProvider = "google"
+	OAuthProviderGithub OAuthProvider = "github"
 )
 
 type OTPPurpose string

@@ -7,9 +7,9 @@ export const Route = createFileRoute('/auth/signup')({
 })
 
 function SignupRoute() {
-    return <div className='flex flex-col gap-6'>
+    return <div className='flex flex-col gap-6 w-full'>
         <SignupForm />
-        <div className='flex items-center gap-4'>
+        <div className='flex items-center gap-4 text-sm'>
             <div className='bg-muted h-px flex-1'></div>
             OR
             <div className='bg-muted h-px flex-1 '></div>

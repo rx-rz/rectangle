@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"rx-rz/rectangle-api/internal/auth"
 	"rx-rz/rectangle-api/internal/helpers"
+	"rx-rz/rectangle-api/internal/integrations"
 	"strings"
 	"time"
 )
@@ -13,13 +14,15 @@ import (
 type Options struct {
 	Port               int
 	AuthService        *auth.AuthService
+	IntegrationService *integrations.Service
 	Logger             *slog.Logger
 	CORSAllowedOrigins string
 }
 
 type routeOptions struct {
-	Mux         *http.ServeMux
-	AuthHandler *auth.Handler
+	Mux                *http.ServeMux
+	AuthHandler        *auth.Handler
+	IntegrationHandler *integrations.Handler
 }
 
 func New(opts Options) *http.Server {
@@ -29,10 +32,15 @@ func New(opts Options) *http.Server {
 		Service: opts.AuthService,
 		Logger:  opts.Logger,
 	})
+	integrationHandler := integrations.NewHandler(integrations.HandlerOptions{
+		Service: opts.IntegrationService,
+		Logger:  opts.Logger,
+	})
 
 	registerRoutes(routeOptions{
-		Mux:         mux,
-		AuthHandler: authHandler,
+		Mux:                mux,
+		AuthHandler:        authHandler,
+		IntegrationHandler: integrationHandler,
 	})
 
 	return &http.Server{
@@ -53,8 +61,19 @@ func registerRoutes(opts routeOptions) {
 	opts.Mux.HandleFunc("POST /auth/login/email", opts.AuthHandler.LoginWithEmail)
 	opts.Mux.HandleFunc("POST /auth/otp/send", opts.AuthHandler.SendOTP)
 	opts.Mux.HandleFunc("POST /auth/otp/verify", opts.AuthHandler.VerifyOTP)
+	opts.Mux.HandleFunc("GET /me", opts.AuthHandler.Me)
+
 	opts.Mux.HandleFunc("GET /auth/google/start", opts.AuthHandler.StartGoogleOauth)
 	opts.Mux.HandleFunc("GET /auth/google/callback", opts.AuthHandler.HandleGoogleOauth)
+	opts.Mux.HandleFunc("GET /auth/github/start", opts.AuthHandler.StartGithubOauth)
+	opts.Mux.HandleFunc("GET /auth/github/callback", opts.AuthHandler.HandleGithubOauth)
+
+	// integrations
+	opts.Mux.HandleFunc("GET /integrations/github/install/start", opts.IntegrationHandler.StartGithubInstallation)
+	opts.Mux.HandleFunc("GET /integrations/github/install/callback", opts.IntegrationHandler.HandleGithubInstallationCallback)
+	opts.Mux.HandleFunc("POST /integrations/github/install/complete", opts.IntegrationHandler.CompleteGithubInstallation)
+	opts.Mux.HandleFunc("GET /integrations/github/installation", opts.IntegrationHandler.GetGithubInstallation)
+	opts.Mux.HandleFunc("POST /integrations/github/webhook", opts.IntegrationHandler.GithubWebhook)
 }
 
 func corsMiddleware(next http.Handler, allowedOrigins string) http.Handler {

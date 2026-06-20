@@ -26,6 +26,16 @@ type Config struct {
 	GithubClientID     string
 	GithubRedirectURI  string
 	GithubClientSecret string
+
+	GithubAppIntegrationAppID            int64
+	GithubAppIntegrationClientID         string
+	GithubAppIntegrationInstallURL       string
+	GithubAppIntegrationSecret           string
+	GithubAppIntegrationPrivateKey       string
+	GithubAppIntegrationRedirectSetupURL string
+	GithubAppIntegrationWebhookURL       string
+	GithubAppIntegrationCallbackURL      string
+	GithubAppIntegrationClientSecret     string
 }
 
 func getString(key, fallback string) string {
@@ -48,6 +58,18 @@ func getInt(key string, fallback int) (int, error) {
 	return parsed, nil
 }
 
+func getInt64(key string, fallback int64) (int64, error) {
+	value := os.Getenv(key)
+	if value == "" {
+		return fallback, nil
+	}
+	parsed, err := strconv.ParseInt(value, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("%s must be a valid integer", key)
+	}
+	return parsed, nil
+}
+
 func getDatabaseURL() string {
 	if value := os.Getenv("DATABASE_URL"); value != "" {
 		return value
@@ -58,6 +80,10 @@ func getDatabaseURL() string {
 func Load() (Config, error) {
 	_ = godotenv.Load()
 	port, err := getInt("API_PORT", 4001)
+	if err != nil {
+		return Config{}, err
+	}
+	githubAppIntegrationAppID, err := getInt64("GITHUB_APP_INTEGRATION_APP_ID", 0)
 	if err != nil {
 		return Config{}, err
 	}
@@ -80,6 +106,16 @@ func Load() (Config, error) {
 		GithubClientID:     getString("GITHUB_CLIENT_ID", ""),
 		GithubRedirectURI:  getString("GITHUB_REDIRECT_URI", ""),
 		GithubClientSecret: getString("GITHUB_CLIENT_SECRET", ""),
+
+		GithubAppIntegrationAppID:            githubAppIntegrationAppID,
+		GithubAppIntegrationClientID:         getString("GITHUB_APP_INTEGRATION_CLIENT_ID", ""),
+		GithubAppIntegrationInstallURL:       getString("GITHUB_APP_INTEGRATION_INSTALL_URL", ""),
+		GithubAppIntegrationSecret:           getString("GITHUB_APP_INTEGRATION_SECRET", ""),
+		GithubAppIntegrationPrivateKey:       getString("GITHUB_APP_INTEGRATION_PRIVATE_KEY", ""),
+		GithubAppIntegrationRedirectSetupURL: getString("GITHUB_APP_INTEGRATION_REDIRECT_SETUP_URL", ""),
+		GithubAppIntegrationWebhookURL:       getString("GITHUB_APP_INTEGRATION_WEBHOOK_URL", ""),
+		GithubAppIntegrationCallbackURL:      getString("GITHUB_APP_INTEGRATION_CALLBACK_URL", ""),
+		GithubAppIntegrationClientSecret:     getString("GITHUB_APP_INTEGRATION_CLIENT_SECRET", ""),
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -165,6 +201,75 @@ func (c Config) Validate() error {
 
 	if c.GithubRedirectURI == "" {
 		return fmt.Errorf("GITHUB_REDIRECT_URI is required")
+	}
+
+	if c.GithubAppIntegrationAppID <= 0 {
+		return fmt.Errorf("GITHUB_APP_INTEGRATION_APP_ID is required")
+	}
+
+	if c.GithubAppIntegrationClientID == "" {
+		return fmt.Errorf("GITHUB_APP_INTEGRATION_CLIENT_ID is required")
+	}
+
+	if c.GithubAppIntegrationInstallURL == "" {
+		return fmt.Errorf("GITHUB_APP_INTEGRATION_INSTALL_URL is required")
+	}
+
+	if err := validateHTTPURL("GITHUB_APP_INTEGRATION_INSTALL_URL", c.GithubAppIntegrationInstallURL); err != nil {
+		return err
+	}
+
+	if c.GithubAppIntegrationSecret == "" {
+		return fmt.Errorf("GITHUB_APP_INTEGRATION_SECRET is required")
+	}
+
+	if c.GithubAppIntegrationPrivateKey == "" {
+		return fmt.Errorf("GITHUB_APP_INTEGRATION_PRIVATE_KEY is required")
+	}
+
+	if c.GithubAppIntegrationRedirectSetupURL == "" {
+		return fmt.Errorf("GITHUB_APP_INTEGRATION_REDIRECT_SETUP_URL is required")
+	}
+
+	if err := validateHTTPURL("GITHUB_APP_INTEGRATION_REDIRECT_SETUP_URL", c.GithubAppIntegrationRedirectSetupURL); err != nil {
+		return err
+	}
+
+	if c.GithubAppIntegrationWebhookURL == "" {
+		return fmt.Errorf("GITHUB_APP_INTEGRATION_WEBHOOK_URL is required")
+	}
+
+	if err := validateHTTPURL("GITHUB_APP_INTEGRATION_WEBHOOK_URL", c.GithubAppIntegrationWebhookURL); err != nil {
+		return err
+	}
+
+	if c.GithubAppIntegrationCallbackURL == "" {
+		return fmt.Errorf("GITHUB_APP_INTEGRATION_CALLBACK_URL is required")
+	}
+
+	if err := validateHTTPURL("GITHUB_APP_INTEGRATION_CALLBACK_URL", c.GithubAppIntegrationCallbackURL); err != nil {
+		return err
+	}
+
+	if c.GithubAppIntegrationClientSecret == "" {
+		return fmt.Errorf("GITHUB_APP_INTEGRATION_CLIENT_SECRET is required")
+	}
+
+	return nil
+}
+
+func validateHTTPURL(key, value string) error {
+	parsedURL, err := url.Parse(value)
+	if err != nil {
+		return fmt.Errorf("%s is invalid: %w", key, err)
+	}
+
+	if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
+		return fmt.Errorf("%s must use http:// or https://", key)
+	}
+
+	if parsedURL.Host == "" {
+		return fmt.Errorf("%s must include a host", key)
 	}
 
 	return nil

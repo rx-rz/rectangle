@@ -25,7 +25,9 @@ export const useLoginForm = () => {
 
 	const handleSubmit: SubmitHandler<typeof LoginSchema> = (output) => {
 		void (async () => {
-			await loginMutation.mutateAsync(output);
+			await loginMutation.mutateAsync(output, {onSuccess: (data) => {
+				console.log(data)
+			}});
 			await navigate({ to: "/" });
 		})().catch(() => undefined);
 	};

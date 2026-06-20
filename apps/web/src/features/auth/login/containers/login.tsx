@@ -8,12 +8,12 @@ export const LoginForm = () => {
 	const { loginForm, handleSubmit, error, isPending } = useLoginForm();
 
 	return (
-		<div className="h-full">
+		<div className="h-full mt-8">
 			<Form
 				of={loginForm}
 				id="rectangle-login"
 				onSubmit={handleSubmit}
-				className="mt-8 flex flex-col gap-6"
+				className=" flex flex-col gap-6"
 			>
 				<FormischField of={loginForm} path={["email"]}>
 					{(field) => (

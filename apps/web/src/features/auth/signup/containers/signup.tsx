@@ -7,13 +7,13 @@ import { useSignupForm } from "../form/signup-form";
 export const SignupForm = () => {
 	const { signupForm, handleSubmit, error, isPending } = useSignupForm();
 	return (
-		<div className="h-full ">
+		<div className="h-full w-full">
 			<div className="max-w-11/12"></div>
 			<Form
 				of={signupForm}
 				id="rectangle-signup"
 				onSubmit={handleSubmit}
-				className="flex flex-col gap-6 mt-8"
+				className="flex w-full flex-col gap-6 mt-8"
 			>
 				<FormischField of={signupForm} path={["name"]}>
 					{(field) => (

@@ -10,6 +10,7 @@ import (
 	"rx-rz/rectangle-api/internal/auth"
 	"rx-rz/rectangle-api/internal/config"
 	"rx-rz/rectangle-api/internal/db"
+	"rx-rz/rectangle-api/internal/integrations"
 	"rx-rz/rectangle-api/internal/server"
 	"rx-rz/rectangle-api/internal/user"
 	"rx-rz/rectangle-api/platform/logger"
@@ -43,6 +44,11 @@ func main() {
 
 	userRepo := user.NewRepository(database)
 	authRepo := auth.NewRepository(database)
+	integrationRepo := integrations.NewRepository(database)
+	githubAppClient := integrations.NewGithubAppClient(integrations.GithubAppClientOptions{
+		AppID:      cfg.GithubAppIntegrationAppID,
+		PrivateKey: cfg.GithubAppIntegrationPrivateKey,
+	})
 	mailer := mail.NewMailer(cfg)
 	authService := auth.NewService(auth.ServiceOptions{
 		UserRepository:    userRepo,
@@ -53,10 +59,18 @@ func main() {
 		Config:            cfg,
 		Logger:            appLogger,
 	})
+	integrationService := integrations.NewService(integrations.ServiceOptions{
+		InstallationRepository: integrationRepo,
+		SessionRepository:      authRepo,
+		GithubClient:           githubAppClient,
+		Config:                 cfg,
+		Logger:                 appLogger,
+	})
 
 	apiServer := server.New(server.Options{
 		Port:               cfg.Port,
 		AuthService:        authService,
+		IntegrationService: integrationService,
 		Logger:             appLogger,
 		CORSAllowedOrigins: cfg.CORSAllowedOrigins,
 	})

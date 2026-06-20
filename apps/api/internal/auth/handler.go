@@ -16,6 +16,7 @@ import (
 	"rx-rz/rectangle-api/internal/apperror"
 	"rx-rz/rectangle-api/internal/helpers"
 	"rx-rz/rectangle-api/internal/user"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -150,6 +151,47 @@ func (h *Handler) VerifyOTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
+	token, err := helpers.ReadCookie(r, "session_token")
+	if err != nil {
+		helpers.WriteError(w, apperror.Unauthorized("not authenticated"))
+		return
+	}
+
+	result, err := h.service.Me(r.Context(), token)
+	if err != nil {
+		helpers.WriteError(w, err)
+		return
+	}
+
+	err = helpers.WriteData(w, http.StatusOK, toMeResponse(*result), nil)
+	if err != nil {
+		h.logger.Error("failed to write me response", "error", err)
+	}
+}
+
+func (h *Handler) StartGithubOauth(w http.ResponseWriter, r *http.Request) {
+	state := rand.Text()
+	http.SetCookie(w, &http.Cookie{
+		Name:     "github_oauth_state",
+		Value:    state,
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		Secure:   h.service.cfg.AppEnv == "production",
+		MaxAge:   10 * 60,
+	})
+	authUrl := buildGithubAuthURL(OauthConfig{
+		ClientID:    h.service.cfg.GithubClientID,
+		RedirectURI: h.service.cfg.GithubRedirectURI,
+	}, state)
+	if err := helpers.WriteData(w, http.StatusOK, OauthLinkOutput{
+		AuthURL: authUrl,
+	}, nil); err != nil {
+		h.logger.Error("failed to write response", "error", err)
+	}
+}
+
 func (h *Handler) StartGoogleOauth(w http.ResponseWriter, r *http.Request) {
 	state := rand.Text()
 	codeVerifier, codeChallenge := generatePKCE()
@@ -159,6 +201,7 @@ func (h *Handler) StartGoogleOauth(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
+		MaxAge:   10 * 60,
 	})
 
 	http.SetCookie(w, &http.Cookie{
@@ -167,14 +210,15 @@ func (h *Handler) StartGoogleOauth(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
+		MaxAge:   10 * 60,
 	})
 
-	authUrl := buildGoogleAuthURL(GoogleConfig{
+	authUrl := buildGoogleAuthURL(OauthConfig{
 		ClientID:    h.service.cfg.GoogleClientID,
 		RedirectURI: h.service.cfg.GoogleRedirectURI,
 	}, state, codeChallenge)
 
-	if err := helpers.WriteData(w, http.StatusOK, GoogleOauthLinkOutput{
+	if err := helpers.WriteData(w, http.StatusOK, OauthLinkOutput{
 		AuthURL: authUrl,
 	}, nil); err != nil {
 		h.logger.Error("failed to write response", "error", err)
@@ -202,7 +246,7 @@ func (h *Handler) HandleGoogleOauth(w http.ResponseWriter, r *http.Request) {
 		redirectOAuthError(w, r, h.service.cfg.WebAppURL, "invalid_oauth_state")
 		return
 	}
-	tokenResp, err := exchangeGoogleCode(r.Context(), GoogleConfig{
+	tokenResp, err := exchangeGoogleCode(r.Context(), OauthConfig{
 		ClientID:     h.service.cfg.GoogleClientID,
 		ClientSecret: h.service.cfg.GoogleClientSecret,
 		RedirectURI:  h.service.cfg.GoogleRedirectURI,
@@ -219,7 +263,7 @@ func (h *Handler) HandleGoogleOauth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := h.service.LoginWithGoogle(r.Context(), GoogleOAuthInput{
+	result, err := h.service.LoginWithOAuth(r.Context(), OAuthInput{
 		ProviderUserID: googleUser.ID,
 		Email:          googleUser.Email,
 		EmailVerified:  googleUser.EmailVerified,
@@ -227,10 +271,10 @@ func (h *Handler) HandleGoogleOauth(w http.ResponseWriter, r *http.Request) {
 		AvatarURL:      optionalString(googleUser.Picture),
 		UserAgent:      r.UserAgent(),
 		IPAddress:      clientIP(r),
-	})
+	}, OAuthProviderGoogle)
 	if err != nil {
 		h.logger.Error("failed to complete google login", "error", err)
-		redirectOAuthError(w, r, h.service.cfg.WebAppURL, "google_login_failed")
+		redirectOAuthError(w, r, h.service.cfg.WebAppURL, oauthRedirectErrorCode(err, "google_login_failed"))
 		return
 	}
 
@@ -240,7 +284,76 @@ func (h *Handler) HandleGoogleOauth(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, h.service.cfg.WebAppURL, http.StatusFound)
 }
 
-type GoogleConfig struct {
+func (h *Handler) HandleGithubOauth(w http.ResponseWriter, r *http.Request) {
+	code := r.URL.Query().Get("code")
+	state := r.URL.Query().Get("state")
+	if code == "" || state == "" {
+		redirectOAuthError(w, r, h.service.cfg.WebAppURL, "missing_oauth_params")
+		return
+	}
+	savedState, err := helpers.ReadCookie(r, "github_oauth_state")
+	if err != nil {
+		redirectOAuthError(w, r, h.service.cfg.WebAppURL, "missing_oauth_params")
+		return
+	}
+	if state != savedState {
+		redirectOAuthError(w, r, h.service.cfg.WebAppURL, "invalid_oauth_state")
+		return
+	}
+	tokenResp, err := exchangeGithubCode(r.Context(), OauthConfig{
+		ClientID:     h.service.cfg.GithubClientID,
+		ClientSecret: h.service.cfg.GithubClientSecret,
+		RedirectURI:  h.service.cfg.GithubRedirectURI,
+	}, code)
+	if err != nil {
+		h.logger.Error("failed to exchange github oauth code", "error", err)
+		redirectOAuthError(w, r, h.service.cfg.WebAppURL, "github_token_exchange_failed")
+		return
+	}
+	githubUser, err := fetchGithubUser(r.Context(), tokenResp.AccessToken)
+	if err != nil {
+		h.logger.Error("failed to fetch github user", "error", err)
+		redirectOAuthError(w, r, h.service.cfg.WebAppURL, "github_user_fetch_failed")
+		return
+	}
+
+	if githubUser.Email == "" || !githubUser.EmailVerified {
+		email, err := fetchGithubVerifiedEmail(r.Context(), tokenResp.AccessToken)
+		if err != nil {
+			h.logger.Error("failed to fetch github email", "error", err)
+			redirectOAuthError(w, r, h.service.cfg.WebAppURL, "github_email_fetch_failed")
+			return
+		}
+		githubUser.Email = email
+		githubUser.EmailVerified = true
+	}
+
+	name := githubUser.Name
+	if name == "" {
+		name = githubUser.Login
+	}
+
+	result, err := h.service.LoginWithOAuth(r.Context(), OAuthInput{
+		ProviderUserID: strconv.FormatInt(githubUser.ID, 10),
+		Email:          githubUser.Email,
+		EmailVerified:  githubUser.EmailVerified,
+		Name:           optionalString(name),
+		AvatarURL:      optionalString(githubUser.AvatarURL),
+		UserAgent:      r.UserAgent(),
+		IPAddress:      clientIP(r),
+	}, OAuthProviderGithub)
+	if err != nil {
+		h.logger.Error("failed to complete github login", "error", err)
+		redirectOAuthError(w, r, h.service.cfg.WebAppURL, oauthRedirectErrorCode(err, "github_login_failed"))
+		return
+	}
+
+	setSessionCookie(w, result.Token, result.Session.ExpiresAt, h.service.cfg.AppEnv == "production")
+	clearCookie(w, "github_oauth_state")
+	http.Redirect(w, r, h.service.cfg.WebAppURL, http.StatusFound)
+}
+
+type OauthConfig struct {
 	ClientID     string
 	ClientSecret string
 	RedirectURI  string
@@ -253,7 +366,18 @@ func generatePKCE() (verifier string, challenge string) {
 	return
 }
 
-func buildGoogleAuthURL(cfg GoogleConfig, state string, codeChallenge string) string {
+func buildGithubAuthURL(cfg OauthConfig, state string) string {
+	u, _ := url.Parse("https://github.com/login/oauth/authorize")
+	q := u.Query()
+	q.Set("client_id", cfg.ClientID)
+	q.Set("redirect_uri", cfg.RedirectURI)
+	q.Set("scope", "read:user user:email")
+	q.Set("state", state)
+	u.RawQuery = q.Encode()
+	return u.String()
+}
+
+func buildGoogleAuthURL(cfg OauthConfig, state string, codeChallenge string) string {
 	u, _ := url.Parse("https://accounts.google.com/o/oauth2/v2/auth")
 
 	q := u.Query()
@@ -280,7 +404,15 @@ type GoogleTokenResponse struct {
 	IDToken      string `json:"id_token,omitempty"`
 }
 
-func exchangeGoogleCode(ctx context.Context, cfg GoogleConfig, code, codeVerifier string) (*GoogleTokenResponse, error) {
+type GitHubTokenResponse struct {
+	AccessToken string `json:"access_token"`
+	TokenType   string `json:"token_type"`
+	Scope       string `json:"scope"`
+	Error       string `json:"error,omitempty"`
+	ErrorDesc   string `json:"error_description,omitempty"`
+}
+
+func exchangeGoogleCode(ctx context.Context, cfg OauthConfig, code, codeVerifier string) (*GoogleTokenResponse, error) {
 	form := url.Values{}
 	form.Set("code", code)
 	form.Set("client_id", cfg.ClientID)
@@ -327,12 +459,70 @@ func exchangeGoogleCode(ctx context.Context, cfg GoogleConfig, code, codeVerifie
 	return &tokenResp, nil
 }
 
+func exchangeGithubCode(ctx context.Context, cfg OauthConfig, code string) (*GitHubTokenResponse, error) {
+	form := url.Values{}
+	form.Set("client_id", cfg.ClientID)
+	form.Set("client_secret", cfg.ClientSecret)
+	form.Set("redirect_uri", cfg.RedirectURI)
+	form.Set("code", code)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://github.com/login/oauth/access_token", strings.NewReader(form.Encode()))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	res, err := http.DefaultClient.Do(req)
+
+	if err != nil {
+		return nil, err
+	}
+
+	defer res.Body.Close()
+
+	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(res.Body, 4096))
+		return nil, fmt.Errorf("github token exchange failed: status=%d body=%s", res.StatusCode, string(body))
+	}
+
+	var token GitHubTokenResponse
+	if err := json.NewDecoder(res.Body).Decode(&token); err != nil {
+		return nil, err
+	}
+
+	if token.Error != "" {
+		return nil, fmt.Errorf("github token exchange failed: %s: %s", token.Error, token.ErrorDesc)
+	}
+
+	if token.AccessToken == "" {
+		return nil, errors.New("github returned empty access token")
+	}
+
+	return &token, nil
+}
+
 type GoogleUser struct {
 	ID            string `json:"sub"`
 	Email         string `json:"email"`
 	EmailVerified bool   `json:"email_verified"`
 	Name          string `json:"name"`
 	Picture       string `json:"picture"`
+}
+
+type GitHubUser struct {
+	ID            int64  `json:"id"`
+	Login         string `json:"login"`
+	Name          string `json:"name"`
+	AvatarURL     string `json:"avatar_url"`
+	Email         string `json:"email"`
+	EmailVerified bool   `json:"-"`
+}
+
+type GitHubEmail struct {
+	Email    string `json:"email"`
+	Primary  bool   `json:"primary"`
+	Verified bool   `json:"verified"`
 }
 
 func fetchGoogleUser(ctx context.Context, accessToken string) (*GoogleUser, error) {
@@ -371,6 +561,77 @@ func fetchGoogleUser(ctx context.Context, accessToken string) (*GoogleUser, erro
 	return &user, nil
 }
 
+func fetchGithubUser(ctx context.Context, accessToken string) (*GitHubUser, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.github.com/user", nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer res.Body.Close()
+
+	if res.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(res.Body)
+		return nil, fmt.Errorf(
+			"github user request failed: status=%d body=%s",
+			res.StatusCode,
+			string(body),
+		)
+	}
+
+	var user GitHubUser
+	if err := json.NewDecoder(res.Body).Decode(&user); err != nil {
+		return nil, err
+	}
+	if user.ID == 0 {
+		return nil, errors.New("github user response missing id")
+	}
+	if user.Email != "" {
+		user.EmailVerified = true
+	}
+
+	return &user, nil
+}
+
+func fetchGithubVerifiedEmail(ctx context.Context, accessToken string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.github.com/user/emails", nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer res.Body.Close()
+
+	if res.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(res.Body, 4096))
+		return "", fmt.Errorf("github emails request failed: status=%d body=%s", res.StatusCode, string(body))
+	}
+
+	var emails []GitHubEmail
+	if err := json.NewDecoder(res.Body).Decode(&emails); err != nil {
+		return "", err
+	}
+
+	for _, email := range emails {
+		if email.Primary && email.Verified && email.Email != "" {
+			return email.Email, nil
+		}
+	}
+
+	return "", errors.New("github account has no verified email")
+}
+
 func clientIP(r *http.Request) string {
 	if forwardedFor := r.Header.Get("X-Forwarded-For"); forwardedFor != "" {
 		return strings.TrimSpace(strings.Split(forwardedFor, ",")[0])
@@ -396,6 +657,18 @@ func toAuthSessionResponse(session Session) *AuthSessionResponse {
 	return &AuthSessionResponse{
 		ID:        session.ID,
 		ExpiresAt: session.ExpiresAt,
+	}
+}
+
+func toMeResponse(result CurrentSessionResult) MeResponse {
+	return MeResponse{
+		User: user.ToUserResponse(result.User),
+		Connections: ConnectionsResponse{
+			Github: GithubConnectionResponse{
+				Connected:         result.HasGithubConnection,
+				CanImportProjects: result.HasGithubConnection,
+			},
+		},
 	}
 }
 
@@ -425,4 +698,12 @@ func clearCookie(w http.ResponseWriter, name string) {
 func redirectOAuthError(w http.ResponseWriter, r *http.Request, webAppURL string, code string) {
 	redirectURL := webAppURL + "/auth/login?oauth_error=" + url.QueryEscape(code)
 	http.Redirect(w, r, redirectURL, http.StatusFound)
+}
+
+func oauthRedirectErrorCode(err error, fallback string) string {
+	appErr := apperror.Convert(err)
+	if appErr.Code == "USE_EXISTING_LOGIN_METHOD" {
+		return "use_existing_login_method"
+	}
+	return fallback
 }

@@ -14,7 +14,11 @@ type Repository struct {
 	db *sqlx.DB
 }
 
-var ErrOAuthAccountLinked = errors.New("oauth account already linked to another user")
+var (
+	ErrOAuthAccountLinked     = errors.New("oauth account already linked to another user")
+	ErrUseExistingLoginMethod = errors.New("use existing login method")
+	ErrSessionNotFound        = errors.New("session not found")
+)
 
 func NewRepository(db *sqlx.DB) *Repository {
 	return &Repository{db: db}
@@ -116,6 +120,14 @@ func (r *Repository) FindOrCreateOAuthUserWithSession(ctx context.Context, param
 	}
 
 	if dbUser == nil {
+		existingEmailUser, err := findEmailUser(ctx, tx, params.Email)
+		if err != nil {
+			return nil, err
+		}
+		if existingEmailUser != nil {
+			return nil, ErrUseExistingLoginMethod
+		}
+
 		dbUser, err = createOAuthUser(ctx, tx, params)
 		if err != nil {
 			return nil, err
@@ -157,6 +169,23 @@ func findOAuthUser(ctx context.Context, tx *sqlx.Tx, provider OAuthProvider, pro
 		return nil, err
 	}
 	return &dbUser, nil
+}
+
+func findEmailUser(ctx context.Context, tx *sqlx.Tx, email string) (*user.User, error) {
+	query := `
+	SELECT id, name, email, avatar_url, email_verified_at, created_at
+	FROM users
+	WHERE lower(email) = lower($1)
+	`
+	var user user.User
+	err := tx.GetContext(ctx, &user, query, email)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &user, nil
 }
 
 func createOAuthUser(ctx context.Context, tx *sqlx.Tx, params CreateOAuthSessionParams) (*user.User, error) {
@@ -245,4 +274,46 @@ func (r *Repository) CreateSession(ctx context.Context, params CreateSessionPara
 		return nil, err
 	}
 	return &session, nil
+}
+
+func (r *Repository) FindCurrentSession(ctx context.Context, tokenHash []byte) (*CurrentSessionResult, error) {
+	query := `
+	SELECT
+		users.id,
+		users.name,
+		users.email,
+		users.avatar_url,
+		users.email_verified_at,
+		users.created_at,
+		EXISTS (
+			SELECT 1
+			FROM github_installations
+			WHERE github_installations.user_id = users.id
+				AND github_installations.suspended_at IS NULL
+		) AS has_github_connection
+	FROM sessions
+	JOIN users ON users.id = sessions.user_id
+	WHERE sessions.token_hash = $1
+		AND sessions.revoked_at IS NULL
+		AND sessions.expires_at > now()
+	`
+
+	type currentSessionRow struct {
+		user.User
+		HasGithubConnection bool `db:"has_github_connection"`
+	}
+
+	var row currentSessionRow
+	err := r.db.GetContext(ctx, &row, query, tokenHash)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrSessionNotFound
+		}
+		return nil, err
+	}
+
+	return &CurrentSessionResult{
+		User:                row.User,
+		HasGithubConnection: row.HasGithubConnection,
+	}, nil
 }

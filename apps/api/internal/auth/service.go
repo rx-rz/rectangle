@@ -35,6 +35,7 @@ type OAuthRepository interface {
 
 type SessionRepository interface {
 	CreateSession(ctx context.Context, params CreateSessionParams) (*Session, error)
+	FindCurrentSession(ctx context.Context, tokenHash []byte) (*CurrentSessionResult, error)
 }
 
 type AuthService struct {
@@ -209,9 +210,28 @@ func (s *AuthService) VerifyOTP(ctx context.Context, input VerifyOTPParams) (*Se
 	return s.createSessionResult(ctx, verifiedUser, input.UserAgent, input.IPAddress)
 }
 
-func (s *AuthService) LoginWithGoogle(ctx context.Context, input GoogleOAuthInput) (*SessionResult, error) {
+func (s *AuthService) Me(ctx context.Context, token string) (*CurrentSessionResult, error) {
+	if token == "" {
+		return nil, apperror.Unauthorized("not authenticated")
+	}
+	if s.sessionRepo == nil {
+		return nil, apperror.Internal()
+	}
+
+	tokenHash := hashSessionToken(token)
+	result, err := s.sessionRepo.FindCurrentSession(ctx, tokenHash)
+	if err != nil {
+		if errors.Is(err, ErrSessionNotFound) {
+			return nil, apperror.Unauthorized("not authenticated")
+		}
+		return nil, err
+	}
+	return result, nil
+}
+
+func (s *AuthService) LoginWithOAuth(ctx context.Context, input OAuthInput, provider OAuthProvider) (*SessionResult, error) {
 	if !input.EmailVerified {
-		return nil, apperror.Unauthorized("google email is not verified")
+		return nil, apperror.Unauthorized("oauth email is not verified")
 	}
 	if s.oauthRepo == nil {
 		return nil, apperror.Internal()
@@ -225,7 +245,7 @@ func (s *AuthService) LoginWithGoogle(ctx context.Context, input GoogleOAuthInpu
 	result, err := s.oauthRepo.FindOrCreateOAuthUserWithSession(ctx, CreateOAuthSessionParams{
 		UserID:         helpers.NewUserID(),
 		SessionID:      helpers.NewSessionID(),
-		Provider:       OAuthProviderGoogle,
+		Provider:       provider,
 		ProviderUserID: input.ProviderUserID,
 		Email:          input.Email,
 		Name:           input.Name,
@@ -238,6 +258,9 @@ func (s *AuthService) LoginWithGoogle(ctx context.Context, input GoogleOAuthInpu
 	if err != nil {
 		if errors.Is(err, ErrOAuthAccountLinked) {
 			return nil, apperror.Conflict("oauth account already linked")
+		}
+		if errors.Is(err, ErrUseExistingLoginMethod) {
+			return nil, apperror.New("USE_EXISTING_LOGIN_METHOD", "use existing login method", 409)
 		}
 		return nil, err
 	}
@@ -283,6 +306,11 @@ func newSessionToken() (string, []byte, error) {
 	token := base64.RawURLEncoding.EncodeToString(tokenBytes)
 	hash := sha256.Sum256([]byte(token))
 	return token, hash[:], nil
+}
+
+func hashSessionToken(token string) []byte {
+	hash := sha256.Sum256([]byte(token))
+	return hash[:]
 }
 
 func fallback(value, fallbackValue string) string {

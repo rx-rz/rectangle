@@ -26,7 +26,7 @@ Google redirects back to the Go API, not to TanStack Router. The API owns the OA
   Contains `StartGoogleOauth`, `HandleGoogleOauth`, `exchangeGoogleCode`, and `fetchGoogleUser`.
 
 - `apps/api/internal/auth/service.go`
-  Contains `LoginWithGoogle`.
+  Contains `LoginWithOAuth`.
 
 - `apps/api/internal/auth/repository.go`
   Contains the transaction: `FindOrCreateOAuthUserWithSession`.
@@ -264,7 +264,7 @@ The most important field is `ID`. It is Google's stable user ID for this app.
 The handler calls:
 
 ```go
-result, err := h.service.LoginWithGoogle(...)
+result, err := h.service.LoginWithOAuth(...)
 ```
 
 The service lives in:
@@ -381,7 +381,7 @@ Then the transaction commits.
 
 ## Step 9: API Sets Session Cookie And Redirects
 
-After `LoginWithGoogle` succeeds, the callback handler sets the app session cookie:
+After `LoginWithOAuth` succeeds, the callback handler sets the app session cookie:
 
 ```go
 setSessionCookie(w, result.Token, result.Session.ExpiresAt, h.service.cfg.AppEnv == "production")
